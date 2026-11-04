@@ -124,17 +124,15 @@ export default function LoginScreen() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-8 px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-8">
-      <header className="flex shrink-0 justify-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center overflow-y-auto px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div className="m-auto flex w-full flex-col items-center gap-6">
         <img
           src="/logo.png"
           alt="نعمه"
-          className="h-28 w-auto max-w-[13.5rem] object-contain"
+          className="h-36 w-36 object-contain"
         />
-      </header>
 
-      <div className="flex min-h-0 flex-1 items-center overflow-y-auto">
-        <div className="my-auto w-full rounded-2xl bg-white p-6 shadow-lg">
+        <div className="w-full rounded-2xl bg-white p-6 shadow-lg">
           <InstallPrompt />
           {step === 'phone' ? (
             <form className="space-y-4" onSubmit={submitPhone}>
@@ -222,11 +220,11 @@ export default function LoginScreen() {
             </form>
           )}
         </div>
-      </div>
 
-      <p className="mx-auto w-full shrink-0 px-6 text-center font-tajawal text-base font-medium leading-relaxed text-white">
-        نعمه تطبيق إلكتروني يمكنك من مشاركة فائض الطعام والملابس والأثاث مع من يحتاج إليه.
-      </p>
+        <p className="w-full px-2 text-center font-tajawal text-base font-medium leading-relaxed text-white">
+          نعمه تطبيق إلكتروني يمكنك من مشاركة فائض الطعام والملابس والأثاث مع من يحتاج إليه.
+        </p>
+      </div>
     </div>
   );
 }
