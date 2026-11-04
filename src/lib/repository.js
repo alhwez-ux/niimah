@@ -25,7 +25,6 @@ function seed() {
         status: 'open',
         city: 'خميس مشيط',
         district: 'الموسى',
-        contact: '0500000001',
         userId: '',
         createdAt: now - 3600000,
       },
@@ -38,7 +37,6 @@ function seed() {
         status: 'open',
         city: 'خميس مشيط',
         district: 'الرصراص',
-        contact: '0500000002',
         userId: '',
         createdAt: now - 7200000,
       },
@@ -51,11 +49,11 @@ function seed() {
         status: 'open',
         city: 'أبها',
         district: 'الموظفين',
-        contact: '0500000003',
         userId: '',
         createdAt: now - 5400000,
       },
     ],
+    threads: [],
     ads: [
       {
         id: 'seed-ad-share',
@@ -92,6 +90,7 @@ function readLocal() {
       users: Array.isArray(parsed.users) ? parsed.users : [],
       requests: Array.isArray(parsed.requests) ? parsed.requests : [],
       ads: Array.isArray(parsed.ads) ? parsed.ads : [],
+      threads: Array.isArray(parsed.threads) ? parsed.threads : [],
     };
   } catch {
     const seeded = seed();
@@ -167,8 +166,12 @@ async function pullAll(firebase) {
     const snap = await get(ref(db, name));
     return { name, items: nodeList(snap) };
   }
-  const [requests, ads] = await Promise.all([pull('requests'), pull('ads')]);
-  return { requests, ads };
+  const [requests, ads, threads] = await Promise.all([
+    pull('requests'),
+    pull('ads'),
+    pull('threads').catch(() => ({ name: 'threads', items: null })),
+  ]);
+  return { requests, ads, threads };
 }
 
 export function hydrate() {
@@ -187,6 +190,7 @@ async function doHydrate() {
       ...memory,
       requests: remote.requests.items === null ? memory.requests : remote.requests.items,
       ads: remote.ads.items === null ? memory.ads : remote.ads.items,
+      threads: remote.threads.items === null ? memory.threads || [] : remote.threads.items,
     };
     writeLocal(memory);
     return memory;

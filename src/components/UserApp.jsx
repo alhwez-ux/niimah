@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAppState } from '../context';
 import { saveSession } from '../lib/auth';
 import { initialLocation, readLocation } from '../lib/asir';
-import { isSaudiMobile, normalizeDigits } from '../lib/phone';
+import { threadsFor } from '../lib/messages';
 import {
   CATEGORIES,
   KIND_LABEL,
@@ -13,6 +13,7 @@ import {
 } from '../lib/repository';
 import InstallPrompt from './InstallPrompt';
 import LocationFields from './LocationFields';
+import MessageDesk from './Messages';
 import { Button, Field, Warning, inputClass } from './ui';
 
 function newest(list) {
@@ -34,6 +35,7 @@ export default function UserApp({ session }) {
   const [tab, setTab] = useState('home');
   const [showForm, setShowForm] = useState(false);
   const [kind, setKind] = useState('donate');
+  const [chatRequestId, setChatRequestId] = useState(null);
 
   function start(nextKind) {
     setKind(nextKind);
@@ -41,8 +43,10 @@ export default function UserApp({ session }) {
     setTab('requests');
   }
 
+  const chatRequest = data.requests.find((item) => item.id === chatRequestId) || null;
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <header className="px-5 pb-6 pt-3 text-white">
         <img src="/logo.png" alt="نعمه" className="mx-auto h-16 w-auto object-contain" />
         <div className="mt-2 flex items-end justify-between gap-3">
@@ -59,7 +63,7 @@ export default function UserApp({ session }) {
       <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-t-[1.75rem] bg-brand-soft px-4 pt-4">
         <InstallPrompt />
         <Warning text={warning} />
-        {tab === 'home' ? <Home data={data} onStart={start} /> : null}
+        {tab === 'home' ? <Home data={data} user={user} onStart={start} onMessage={setChatRequestId} /> : null}
         {tab === 'requests' ? (
           <Requests
             user={user}
@@ -69,6 +73,7 @@ export default function UserApp({ session }) {
             kind={kind}
             setKind={setKind}
             onResult={onResult}
+            onMessage={setChatRequestId}
           />
         ) : null}
         {tab === 'ads' ? <Ads data={data} /> : null}
@@ -77,6 +82,15 @@ export default function UserApp({ session }) {
         ) : null}
         <div className="h-6" />
       </main>
+      {chatRequest ? (
+        <MessageDesk
+          request={chatRequest}
+          user={user}
+          threads={data.threads || []}
+          onClose={() => setChatRequestId(null)}
+          onResult={onResult}
+        />
+      ) : null}
 
       <nav className="border-t border-black/5 bg-white pb-safe" aria-label="التنقل">
         <div className="grid grid-cols-4">
@@ -90,7 +104,7 @@ export default function UserApp({ session }) {
   );
 }
 
-function Home({ data, onStart }) {
+function Home({ data, user, onStart, onMessage }) {
   const ads = newest(data.ads.filter((ad) => ad.active !== false)).slice(0, 2);
   const requests = newest(data.requests.filter((item) => item.status !== 'done')).slice(0, 3);
 
@@ -129,20 +143,21 @@ function Home({ data, onStart }) {
         {requests.length === 0 ? (
           <Empty text="لم يُنشر شيء هنا بعد." />
         ) : (
-          requests.map((item) => <RequestCard key={item.id} item={item} />)
+          requests.map((item) => (
+            <RequestCard key={item.id} item={item} user={user} threads={data.threads} onMessage={onMessage} />
+          ))
         )}
       </section>
     </div>
   );
 }
 
-function Requests({ user, data, showForm, setShowForm, kind, setKind, onResult }) {
+function Requests({ user, data, showForm, setShowForm, kind, setKind, onResult, onMessage }) {
   const [filter, setFilter] = useState('all');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [location, setLocation] = useState(() => initialLocation(user));
-  const [contact, setContact] = useState(user.phone || '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -157,11 +172,6 @@ function Requests({ user, data, showForm, setShowForm, kind, setKind, onResult }
     setError('');
     if (!title.trim()) {
       setError('اكتب عنوان الطلب');
-      return;
-    }
-    const phone = normalizeDigits(contact);
-    if (phone && !isSaudiMobile(phone)) {
-      setError('أدخل رقم تواصل صحيح');
       return;
     }
     const place = readLocation(location.city, location.districtChoice, location.customDistrict);
@@ -180,7 +190,7 @@ function Requests({ user, data, showForm, setShowForm, kind, setKind, onResult }
         status: 'open',
         city: place.city,
         district: place.district,
-        contact: phone,
+        authorName: user.name,
         userId: user.id,
         createdAt: Date.now(),
       });
@@ -255,15 +265,9 @@ function Requests({ user, data, showForm, setShowForm, kind, setKind, onResult }
             customDistrict={location.customDistrict}
             onChange={setLocation}
           />
-          <Field label="رقم التواصل">
-            <input
-              className={inputClass}
-              dir="ltr"
-              inputMode="numeric"
-              value={contact}
-              onChange={(event) => setContact(normalizeDigits(event.target.value))}
-            />
-          </Field>
+          <p className="text-sm leading-relaxed text-ink/70">
+            التواصل بعد النشر يتم عبر زر المراسلة، من دون إظهار رقم الجوال.
+          </p>
           {error ? (
             <p className="text-sm text-red-800" role="alert">
               {error}
@@ -299,6 +303,9 @@ function Requests({ user, data, showForm, setShowForm, kind, setKind, onResult }
         <RequestCard
           key={item.id}
           item={item}
+          user={user}
+          threads={data.threads}
+          onMessage={onMessage}
           action={
             item.userId === user.id && item.status !== 'done' ? (
               <button type="button" className="text-sm font-bold text-brand-deep" onClick={() => markDone(item)}>
@@ -402,7 +409,9 @@ function Profile({ user, onResult, updateSession, onLogout }) {
   );
 }
 
-function RequestCard({ item, action }) {
+function RequestCard({ item, action, user, threads, onMessage }) {
+  const mine = user && item.userId === user.id;
+  const count = mine ? threadsFor(threads, item.id).length : 0;
   return (
     <article className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-black/5">
       <div className="flex items-center justify-between gap-2">
@@ -421,15 +430,19 @@ function RequestCard({ item, action }) {
           {STATUS_LABEL[item.status] || 'مفتوح'}
           {item.createdAt ? ` · ${formatWhen(item.createdAt)}` : ''}
         </span>
-        {item.contact ? (
-          <a className="text-sm font-bold text-brand-deep" dir="ltr" href={`tel:${item.contact}`}>
-            {item.contact}
-          </a>
-        ) : (
-          action
-        )}
+        <span className="flex items-center gap-3">
+          {action}
+          {onMessage && item.userId ? (
+            <button
+              type="button"
+              className="rounded-2xl bg-brand px-3 py-2 text-sm font-bold text-white"
+              onClick={() => onMessage(item.id)}
+            >
+              {mine ? `الرسائل${count ? ` (${count})` : ''}` : 'مراسلة'}
+            </button>
+          ) : null}
+        </span>
       </div>
-      {item.contact && action ? <div className="mt-2">{action}</div> : null}
     </article>
   );
 }

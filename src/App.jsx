@@ -19,7 +19,7 @@ export default function App() {
   const [splashLeaving, setSplashLeaving] = useState(false);
   const [splashSkip, setSplashSkip] = useState(false);
   const [session, setSession] = useState(null);
-  const [data, setData] = useState({ users: [], requests: [], ads: [] });
+  const [data, setData] = useState({ users: [], requests: [], ads: [], threads: [] });
   const [warning, setWarning] = useState('');
   const [installEvent, setInstallEvent] = useState(installStore.event);
   const [installed, setInstalled] = useState(installStore.installed);
@@ -79,8 +79,15 @@ export default function App() {
   }, []);
 
   const onResult = useCallback((result) => {
-    if (result?.data) setData(result.data);
-    if (result?.users) setData((current) => ({ ...current, users: result.users }));
+    if (result?.data || result?.users || result?.threads) {
+      setData((current) => {
+        const next = result.data ? { ...current, ...result.data } : { ...current };
+        if (result.users) next.users = result.users;
+        if (result.threads) next.threads = result.threads;
+        if (!Array.isArray(next.threads)) next.threads = [];
+        return next;
+      });
+    }
     if (result && Object.prototype.hasOwnProperty.call(result, 'warning')) {
       setWarning(result.warning || '');
     }

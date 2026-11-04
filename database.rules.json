@@ -18,6 +18,12 @@
         ".write": "auth != null"
       }
     },
+    "threads": {
+      ".read": true,
+      "$id": {
+        ".write": "auth != null"
+      }
+    },
     "settings": {
       "supervisors": {
         ".read": true,

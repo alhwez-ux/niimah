@@ -3,6 +3,7 @@ import { useAppState } from '../context';
 import { grantSupervisor, isSuperAdmin, loadSupervisors, revokeSupervisor, SUPER_ADMIN_PHONE } from '../lib/access';
 import { changeOwnerPassword } from '../lib/auth';
 import { initialLocation, readLocation } from '../lib/asir';
+import { partyRole } from '../lib/messages';
 import { isSaudiMobile, normalizeDigits } from '../lib/phone';
 import {
   CATEGORIES,
@@ -20,6 +21,7 @@ import { Button, Field, Warning, inputClass } from './ui';
 const TABS = [
   ['users', 'المستخدمون'],
   ['requests', 'الطلبات'],
+  ['messages', 'الرسائل'],
   ['ads', 'الإعلانات'],
   ['security', 'الرقم السري'],
 ];
@@ -32,7 +34,6 @@ const blankRequest = {
   category: 'طعام',
   kind: 'donate',
   status: 'open',
-  contact: '',
   userId: '',
   createdAt: 0,
   ...initialLocation({}),
@@ -52,7 +53,7 @@ export default function AdminPanel() {
   const { data, session, warning, onResult, signOut } = useAppState();
   const [tab, setTab] = useState('requests');
   const isSuper = session?.role === 'super' || isSuperAdmin(session?.phone);
-  const tabs = isSuper ? [...TABS.slice(0, 3), ['staff', 'المشرفون'], TABS[3]] : TABS;
+  const tabs = isSuper ? [...TABS.slice(0, 4), ['staff', 'المشرفون'], TABS[4]] : TABS;
 
   useEffect(() => {
     let active = true;
@@ -62,6 +63,13 @@ export default function AdminPanel() {
       })
       .catch(() => {
         if (active) onResult({ warning: 'تعذر تحميل قائمة المستخدمين من قاعدة البيانات.' });
+      });
+    listOwnerCollection('threads')
+      .then((threads) => {
+        if (active) onResult({ threads, warning: '' });
+      })
+      .catch(() => {
+        if (active) onResult({ warning: 'تعذر تحميل الرسائل من قاعدة البيانات.' });
       });
     return () => {
       active = false;
@@ -104,6 +112,7 @@ export default function AdminPanel() {
         <Warning text={warning} />
         {tab === 'users' ? <UsersTab data={data} onResult={onResult} /> : null}
         {tab === 'requests' ? <RequestsTab data={data} onResult={onResult} /> : null}
+        {tab === 'messages' ? <MessagesTab data={data} /> : null}
         {tab === 'ads' ? <AdsTab data={data} onResult={onResult} /> : null}
         {tab === 'staff' && isSuper ? <StaffTab /> : null}
         {tab === 'security' ? <SecurityTab /> : null}
@@ -250,25 +259,22 @@ function RequestsTab({ data, onResult }) {
       setError('اكتب عنوان الطلب');
       return;
     }
-    const contact = form.contact ? normalizeDigits(form.contact) : '';
-    if (contact && !isSaudiMobile(contact)) {
-      setError('أدخل رقم تواصل صحيح أو اتركه فارغًا');
-      return;
-    }
     const place = readLocation(form.city, form.districtChoice, form.customDistrict);
     if (!place) {
       setError('اكتب اسم الحي');
       return;
     }
-    const { districtChoice, customDistrict, ...rest } = form;
     const item = {
-      ...rest,
       id: form.id || newId(),
       title: form.title.trim(),
       description: form.description.trim(),
-      contact,
+      category: form.category,
+      kind: form.kind,
+      status: form.status,
       city: place.city,
       district: place.district,
+      userId: form.userId,
+      authorName: form.authorName || '',
       createdAt: form.createdAt || Date.now(),
     };
     setBusy(true);
@@ -348,9 +354,6 @@ function RequestsTab({ data, onResult }) {
               </select>
             </Field>
           </div>
-          <Field label="رقم التواصل">
-            <input className={inputClass} dir="ltr" inputMode="numeric" value={form.contact} onChange={(event) => setForm({ ...form, contact: event.target.value })} />
-          </Field>
           {error ? <p className="text-sm text-red-800">{error}</p> : null}
           <Button type="submit" busy={busy}>{busy ? 'جارٍ الحفظ' : form.id ? 'حفظ التعديل' : 'إضافة الطلب'}</Button>
           <Button variant="ghost" onClick={() => { setOpen(false); setForm(blankRequest); }}>إلغاء</Button>
@@ -370,6 +373,54 @@ function RequestsTab({ data, onResult }) {
           </div>
         </article>
       ))}
+    </section>
+  );
+}
+
+function MessagesTab({ data }) {
+  const [openId, setOpenId] = useState(null);
+  const threads = [...(data.threads || [])].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const requests = new Map(data.requests.map((item) => [item.id, item]));
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-xl font-bold md:text-2xl">الرسائل</h2>
+      <p className="text-base leading-relaxed text-ink/70">اطلاع على مراسلات المحتاج والمتبرع.</p>
+      {threads.length === 0 ? (
+        <p className="rounded-3xl bg-white px-4 py-6 text-center text-base text-ink/70">لا توجد رسائل بعد.</p>
+      ) : null}
+      {threads.map((thread) => {
+        const request = requests.get(thread.requestId);
+        const messages = Array.isArray(thread.messages) ? thread.messages : [];
+        const open = openId === thread.id;
+        return (
+          <article key={thread.id} className="rounded-3xl bg-white p-4 ring-1 ring-black/5">
+            <button type="button" className="w-full text-right" onClick={() => setOpenId(open ? null : thread.id)}>
+              <p className="text-sm font-semibold text-brand-deep">{thread.requestTitle || request?.title || 'طلب'}</p>
+              <h3 className="mt-1 text-base font-bold">
+                {thread.ownerName || partyRole(request, 'owner')} · {thread.peerName || partyRole(request, 'peer')}
+              </h3>
+              <p className="mt-1 text-sm text-ink/60">{messages.length} رسالة</p>
+            </button>
+            {open ? (
+              <div className="mt-3 space-y-2">
+                {messages.map((message) => {
+                  const fromOwner = message.fromId === thread.ownerId;
+                  const name = fromOwner
+                    ? thread.ownerName || partyRole(request, 'owner')
+                    : thread.peerName || partyRole(request, 'peer');
+                  return (
+                    <p key={message.id} className="rounded-2xl bg-brand-soft px-3 py-2 text-sm leading-relaxed text-ink">
+                      <span className="font-bold text-brand-deep">{name}: </span>
+                      {message.text}
+                    </p>
+                  );
+                })}
+              </div>
+            ) : null}
+          </article>
+        );
+      })}
     </section>
   );
 }
