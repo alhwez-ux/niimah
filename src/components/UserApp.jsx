@@ -54,9 +54,18 @@ export default function UserApp({ session }) {
             <p className="text-sm text-white/80">أهلًا بك</p>
             <h1 className="truncate text-xl font-bold md:text-2xl">{user.name}</h1>
           </div>
-          <p className="shrink-0 rounded-full bg-white/15 px-3 py-1 text-sm font-semibold">
-            {ROLE_LABEL[user.role] || 'مستخدم'}
-          </p>
+          <div className="flex shrink-0 items-center gap-2">
+            <p className="rounded-full bg-white/15 px-3 py-1 text-sm font-semibold">
+              {ROLE_LABEL[user.role] || 'مستخدم'}
+            </p>
+            <button
+              type="button"
+              onClick={signOut}
+              className="rounded-2xl bg-white/15 px-3 py-2 text-sm font-bold"
+            >
+              خروج
+            </button>
+          </div>
         </div>
       </header>
 
