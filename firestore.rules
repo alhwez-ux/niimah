@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+
+    function isMobileId(id) {
+      return id.matches('^05[0-9]{8}$');
+    }
+
+    match /users/{id} {
+      allow get: if isMobileId(id);
+      allow list: if isOwner();
+      allow create, update: if isOwner()
+        || (signedIn()
+            && isMobileId(id)
+            && request.resource.data.phone == id
+            && request.resource.data.id == id);
+      allow delete: if isOwner();
+    }
+
+    match /requests/{id} {
+      allow read: if true;
+      allow create: if signedIn();
+      allow update: if isOwner()
+        || (signedIn() && request.resource.data.userId == resource.data.userId);
+      allow delete: if isOwner();
+    }
+
+    match /ads/{id} {
+      allow read: if true;
+      allow write: if isOwner();
+    }
+
+    match /settings/{id} {
+      allow read, write: if isOwner();
+    }
+  }
+}
