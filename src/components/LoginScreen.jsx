@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { useAppState } from '../context';
-import { loginOwner, signInRegularUser } from '../lib/auth';
+import { loginOwner, signInRegularUser, signInStaff } from '../lib/auth';
+import { isStaffPhone } from '../lib/access';
+import { initialLocation, readLocation } from '../lib/asir';
 import { isSaudiMobile, normalizeDigits } from '../lib/phone';
 import { findUserByPhone, saveItem } from '../lib/repository';
 import InstallPrompt from './InstallPrompt';
+import LocationFields from './LocationFields';
 import { Button, Field, inputClass } from './ui';
 
 export default function LoginScreen() {
@@ -14,6 +17,9 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState('donor');
+  const [location, setLocation] = useState(() => initialLocation({}));
+  const [accepted, setAccepted] = useState(false);
+  const [staffRole, setStaffRole] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const ownerMode = phone.length === 10 && !isSaudiMobile(phone);
@@ -28,35 +34,42 @@ export default function LoginScreen() {
   async function submitPhone(event) {
     event.preventDefault();
     setError('');
-    if (ownerMode) {
-      if (!password.trim()) {
-        setError('أدخل الرقم السري');
-        return;
-      }
-      setBusy(true);
-      try {
-        signIn(await loginOwner(phone, password));
-      } catch (err) {
-        setError(err.message || 'تعذر التحقق');
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
-
-    if (!isSaudiMobile(phone)) {
-      setError('أدخل رقم جوال صحيح');
-      return;
-    }
-
     setBusy(true);
     try {
+      if (ownerMode) {
+        if (!password.trim()) {
+          setError('أدخل الرقم السري');
+          return;
+        }
+        signIn(await loginOwner(phone, password));
+        return;
+      }
+
+      if (!isSaudiMobile(phone)) {
+        setError('أدخل رقم جوال صحيح');
+        return;
+      }
+
+      const access = await isStaffPhone(phone);
       const existing = await findUserByPhone(phone);
+      if (access) {
+        if (!existing) {
+          setStaffRole(access);
+          setStep('profile');
+          return;
+        }
+        signIn(await signInStaff(await ensureActive(existing), access));
+        return;
+      }
+
+      setStaffRole(null);
       if (existing) {
-        signIn(await signInRegularUser(existing));
+        signIn(await signInRegularUser(await ensureActive(existing)));
         return;
       }
       setStep('profile');
+    } catch (err) {
+      setError(err.message || 'تعذر الاتصال. أعد المحاولة.');
     } finally {
       setBusy(false);
     }
@@ -69,17 +82,32 @@ export default function LoginScreen() {
       setError('اكتب الاسم');
       return;
     }
+    const place = readLocation(location.city, location.districtChoice, location.customDistrict);
+    if (!place) {
+      setError('اكتب اسم الحي');
+      return;
+    }
+    if (!accepted) {
+      setError('الإقرار بإخلاء المسؤولية شرط أساسي لإكمال التسجيل');
+      return;
+    }
     const user = {
       id: phone,
       name: name.trim(),
       phone,
       role,
+      city: place.city,
+      district: place.district,
+      active: true,
+      disclaimerAcceptedAt: Date.now(),
       createdAt: Date.now(),
     };
     setBusy(true);
     try {
-      onResult(await saveItem('users', user));
-      signIn(await signInRegularUser(user));
+      const result = await saveItem('users', user);
+      onResult(result);
+      if (staffRole) signIn(await signInStaff(user, staffRole));
+      else signIn(await signInRegularUser(user));
     } catch (err) {
       setError(err.message || 'تعذر حفظ البيانات');
     } finally {
@@ -87,18 +115,22 @@ export default function LoginScreen() {
     }
   }
 
+  async function ensureActive(user) {
+    if (user.active !== false) return user;
+    const next = { ...user, active: true };
+    const result = await saveItem('users', next);
+    onResult(result);
+    return next;
+  }
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <header className="px-6 pb-8 pt-6 text-center text-white">
-        <img src="/logo.jpg" alt="نعمه" className="mx-auto w-full max-w-[280px]" />
-        <h1 className="mt-2 text-xl font-bold md:text-2xl">نعمه</h1>
-        <p className="mt-2 text-base leading-relaxed text-white/90">
-          شارك فائض الطعام والملابس والأثاث مع من يحتاجه.
-        </p>
+    <div className="flex min-h-0 flex-1 flex-col px-5">
+      <header className="flex shrink-0 justify-center px-6 pb-2 pt-4">
+        <img src="/logo.jpg" alt="نعمه" className="h-24 w-auto max-w-[180px] object-contain sm:h-28" />
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-t-[1.75rem] bg-brand-soft">
-        <div className="px-5 pb-6 pt-6">
+      <div className="flex min-h-0 flex-1 items-center overflow-y-auto py-3">
+        <div className="my-auto w-full rounded-[1.75rem] bg-white p-5 shadow-xl shadow-black/10">
           <InstallPrompt />
           {step === 'phone' ? (
             <form className="space-y-4" onSubmit={submitPhone}>
@@ -139,17 +171,17 @@ export default function LoginScreen() {
                   {error}
                 </p>
               ) : null}
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" busy={busy}>
                 {busy ? 'جارٍ التحقق' : 'متابعة'}
               </Button>
             </form>
           ) : (
-            <form className="space-y-4" onSubmit={submitProfile}>
-              <h2 className="text-xl font-bold text-ink md:text-2xl">أكمل بياناتك</h2>
-              <p className="text-base leading-relaxed text-ink/70">
+            <form className="space-y-4" noValidate onSubmit={submitProfile}>
+              <h2 className="text-center text-xl font-bold text-ink md:text-2xl">أكمل بياناتك</h2>
+              <p className="text-center text-base leading-relaxed text-ink/70">
                 الاسم يظهر للمتبرعين والمحتاجين داخل الطلبات.
               </p>
-              <Field label="الاسم">
+              <Field label="الاسم (يمكنك اختيار اسم مستعار أو كنيه)">
                 <input
                   className={inputClass}
                   maxLength={40}
@@ -165,23 +197,60 @@ export default function LoginScreen() {
                   أنا محتاج
                 </RoleButton>
               </div>
+              <LocationFields
+                city={location.city}
+                districtChoice={location.districtChoice}
+                customDistrict={location.customDistrict}
+                onChange={setLocation}
+              />
+              <DisclaimerAck checked={accepted} onChange={setAccepted} />
               {error ? (
                 <p className="text-sm text-red-800" role="alert">
                   {error}
                 </p>
               ) : null}
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" busy={busy}>
                 {busy ? 'جارٍ الحفظ' : 'ابدأ'}
               </Button>
-              <Button variant="ghost" onClick={() => setStep('phone')}>
+              <Button variant="ghost" onClick={() => setStep('phone')} disabled={busy}>
                 رجوع
               </Button>
             </form>
           )}
         </div>
-        <div className="pb-safe" />
       </div>
+
+      <p className="mx-auto w-full max-w-xs shrink-0 px-3 pb-4 pt-2 text-center text-base font-semibold leading-relaxed text-white">
+        نعمه تطبيق إلكتروني يمكنك من مشاركة فائض الطعام والملابس والأثاث مع من يحتاج إليه.
+      </p>
+      <div className="pb-safe" />
     </div>
+  );
+}
+
+function DisclaimerAck({ checked, onChange }) {
+  return (
+    <section className="rounded-2xl bg-brand-soft p-3 ring-1 ring-brand/15">
+      <h3 className="text-base font-bold text-brand-deep">إخلاء مسؤولية</h3>
+      <div className="mt-2 space-y-2 text-sm font-semibold leading-relaxed text-ink">
+        <p>تطبيق نعمه هو منصة وسيطة لحفظ النعمه، ولا يتبع لأي جهة أو جمعية خيرية.</p>
+        <p>
+          التطبيق غير ربحي ويقتصر على عرض فائض الطعام أو الملابس أو الأجهزة المستعملة ليستفيد منها من يحتاج إليها ولا يتحمل أي مسؤولية قانونية أو التزام تجاه المتبرع أو المحتاج أو المتبرع به، مع التأكيد على عدم طلب أي تبرع نقدي ويتم طلب ذلك عن طريق الجمعيات الخيرية المعتمدة في المملكة العربية السعودية.
+        </p>
+      </div>
+      <label className="mt-3 flex min-h-12 cursor-pointer items-start gap-3 rounded-2xl bg-white px-3 py-3 ring-1 ring-brand/10">
+        <input
+          type="checkbox"
+          className="mt-1 h-5 w-5 shrink-0 accent-[#3B986C]"
+          checked={checked}
+          required
+          onChange={(event) => onChange(event.target.checked)}
+        />
+        <span className="text-sm font-bold leading-relaxed text-ink">
+          أقر بأنني قرأت إخلاء المسؤولية وأوافق عليه، وهذا الإقرار شرط أساسي للتسجيل.
+        </span>
+      </label>
+    </section>
   );
 }
 

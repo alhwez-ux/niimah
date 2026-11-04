@@ -1,0 +1,32 @@
+{
+  "rules": {
+    "users": {
+      ".read": "auth != null",
+      "$phone": {
+        ".write": "auth != null && $phone.matches(/^05[0-9]{8}$/)"
+      }
+    },
+    "requests": {
+      ".read": true,
+      "$id": {
+        ".write": "auth != null"
+      }
+    },
+    "ads": {
+      ".read": true,
+      "$id": {
+        ".write": "auth != null"
+      }
+    },
+    "settings": {
+      "supervisors": {
+        ".read": true,
+        ".write": "auth != null"
+      },
+      "owner": {
+        ".read": "auth != null && auth.token.email.endsWith('@niimah.app')",
+        ".write": "auth != null && auth.token.email.endsWith('@niimah.app')"
+      }
+    }
+  }
+}

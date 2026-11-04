@@ -38,7 +38,8 @@ service cloud.firestore {
     }
 
     match /settings/{id} {
-      allow read, write: if isOwner();
+      allow read: if id == 'supervisors' || isOwner();
+      allow write: if (id == 'supervisors' && signedIn()) || (id != 'supervisors' && isOwner());
     }
   }
 }

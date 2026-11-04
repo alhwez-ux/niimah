@@ -3,6 +3,22 @@ import { SESSION_KEY } from './owner';
 
 const attempts = { count: 0, until: 0 };
 
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 function remember(session) {
   if (!session) localStorage.removeItem(SESSION_KEY);
   else localStorage.setItem(SESSION_KEY, JSON.stringify(session));
@@ -45,14 +61,38 @@ export async function loginOwner(identifier, password) {
 
   const firebase = await loadFirebase();
   try {
-    await firebase.signInWithEmailAndPassword(firebase.auth, `${identifier}@niimah.app`, secret);
-  } catch {
+    await withTimeout(
+      firebase.signInWithEmailAndPassword(firebase.auth, `${identifier}@niimah.app`, secret),
+      8000,
+    );
+  } catch (error) {
+    if (error?.message === 'timeout') {
+      throw new Error('انتهت مهلة الاتصال. أعد المحاولة.');
+    }
     failAttempt();
   }
 
   attempts.count = 0;
   attempts.until = 0;
-  return remember({ kind: 'owner' });
+  return remember({ kind: 'owner', role: 'super' });
+}
+
+export async function signInStaff(user, role) {
+  const session = remember({
+    kind: 'owner',
+    role,
+    phone: user.phone,
+    name: user.name,
+  });
+  try {
+    const firebase = await loadFirebase();
+    if (!firebase.auth.currentUser) {
+      await withTimeout(firebase.signInAnonymously(firebase.auth), 8000);
+    }
+  } catch (error) {
+    console.warn(error);
+  }
+  return session;
 }
 
 export async function signInRegularUser(user) {
@@ -69,7 +109,7 @@ export async function signInRegularUser(user) {
   try {
     const firebase = await loadFirebase();
     if (!firebase.auth.currentUser) {
-      await firebase.signInAnonymously(firebase.auth);
+      await withTimeout(firebase.signInAnonymously(firebase.auth), 8000);
     }
   } catch (error) {
     console.warn(error);
@@ -82,7 +122,7 @@ export async function logout() {
   remember(null);
   try {
     const firebase = await loadFirebase();
-    if (firebase.auth.currentUser) await firebase.signOut(firebase.auth);
+    if (firebase.auth.currentUser) await withTimeout(firebase.signOut(firebase.auth), 8000);
   } catch (error) {
     console.warn(error);
   }
@@ -91,7 +131,13 @@ export async function logout() {
 export async function watchAuthUser() {
   const firebase = await loadFirebase();
   return new Promise((resolve) => {
-    const stop = firebase.onAuthStateChanged(firebase.auth, (user) => {
+    let stop = () => {};
+    const timer = setTimeout(() => {
+      stop();
+      resolve(null);
+    }, 4000);
+    stop = firebase.onAuthStateChanged(firebase.auth, (user) => {
+      clearTimeout(timer);
       stop();
       resolve(user);
     });
@@ -109,7 +155,7 @@ export async function changeOwnerPassword(currentPassword, nextPassword) {
   }
 
   const firebase = await loadFirebase();
-  const { auth, db, doc, setDoc, EmailAuthProvider, reauthenticateWithCredential, updatePassword } = firebase;
+  const { auth, db, ref, set, EmailAuthProvider, reauthenticateWithCredential, updatePassword } = firebase;
   const email = auth.currentUser?.email;
   if (!email) {
     throw new Error('تعذر تحديث الرقم السري. تأكد من الرقم الحالي.');
@@ -117,15 +163,26 @@ export async function changeOwnerPassword(currentPassword, nextPassword) {
 
   try {
     const credential = EmailAuthProvider.credential(email, current);
-    await reauthenticateWithCredential(auth.currentUser, credential);
-    await updatePassword(auth.currentUser, next);
-    try {
-      await setDoc(doc(db, 'settings', 'owner'), { updatedAt: Date.now() }, { merge: true });
-    } catch (error) {
-      console.warn(error);
-    }
+    await Promise.race([
+      (async () => {
+        await reauthenticateWithCredential(auth.currentUser, credential);
+        await updatePassword(auth.currentUser, next);
+        try {
+          await set(ref(db, 'settings/owner'), { updatedAt: Date.now() });
+        } catch (error) {
+          console.warn(error);
+        }
+      })(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('timeout')), 8000);
+      }),
+    ]);
   } catch (error) {
     console.warn(error);
-    throw new Error('تعذر تحديث الرقم السري. تأكد من الرقم الحالي.');
+    throw new Error(
+      error?.message === 'timeout'
+        ? 'انتهت مهلة الاتصال بقاعدة البيانات. أعد المحاولة.'
+        : 'تعذر تحديث الرقم السري. تأكد من الرقم الحالي.',
+    );
   }
 }

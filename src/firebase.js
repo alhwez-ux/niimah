@@ -9,22 +9,12 @@ import {
   signOut,
   updatePassword,
 } from 'firebase/auth';
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  getFirestore,
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
-  setDoc,
-} from 'firebase/firestore';
+import { get, getDatabase, ref, remove, set } from 'firebase/database';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDaGBWr7ZNrw6jQirhyn26MoWwNHH8zyEg',
   authDomain: 'niimah.firebaseapp.com',
+  databaseURL: 'https://niimah-default-rtdb.europe-west1.firebasedatabase.app',
   projectId: 'niimah',
   storageBucket: 'niimah.firebasestorage.app',
   messagingSenderId: '500035395969',
@@ -33,29 +23,22 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-
-let db;
-try {
-  db = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager(),
-    }),
-  });
-} catch (error) {
-  console.warn(error);
-  db = getFirestore(app);
-}
+const db = getDatabase(app);
 
 export { app, auth, db };
 
 export function isFirebaseConfigured() {
-  return true;
+  return Boolean(firebaseConfig.apiKey && firebaseConfig.databaseURL);
 }
 
 export function loadFirebase() {
   return Promise.resolve({
     auth,
     db,
+    ref,
+    get,
+    set,
+    remove,
     signInWithEmailAndPassword,
     signOut,
     updatePassword,
@@ -63,11 +46,5 @@ export function loadFirebase() {
     EmailAuthProvider,
     onAuthStateChanged,
     signInAnonymously,
-    doc,
-    setDoc,
-    deleteDoc,
-    getDoc,
-    getDocs,
-    collection,
   });
 }

@@ -43,6 +43,19 @@ p {
   overflow-wrap: break-word;
 }
 
+@keyframes niimah-sheen {
+  from {
+    transform: translateX(140%);
+  }
+  to {
+    transform: translateX(-140%);
+  }
+}
+
+.animate-niimah-sheen {
+  animation: niimah-sheen 0.85s ease-in-out infinite;
+}
+
 @layer utilities {
   .pt-safe {
     padding-top: env(safe-area-inset-top);

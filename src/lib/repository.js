@@ -23,6 +23,8 @@ function seed() {
         category: 'طعام',
         kind: 'donate',
         status: 'open',
+        city: 'خميس مشيط',
+        district: 'الموسى',
         contact: '0500000001',
         userId: '',
         createdAt: now - 3600000,
@@ -34,6 +36,8 @@ function seed() {
         category: 'ملابس',
         kind: 'donate',
         status: 'open',
+        city: 'خميس مشيط',
+        district: 'الرصراص',
         contact: '0500000002',
         userId: '',
         createdAt: now - 7200000,
@@ -45,6 +49,8 @@ function seed() {
         category: 'أثاث',
         kind: 'need',
         status: 'open',
+        city: 'أبها',
+        district: 'الموظفين',
         contact: '0500000003',
         userId: '',
         createdAt: now - 5400000,
@@ -99,30 +105,9 @@ export function newId() {
   return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export async function findUserByPhone(phone) {
-  const local = (memory || readLocal()).users.find((user) => user.phone === phone) || null;
-  if (local || !isFirebaseConfigured()) return local;
-  try {
-    const firebase = await loadFirebase();
-    const snap = await firebase.getDoc(firebase.doc(firebase.db, 'users', phone));
-    if (!snap.exists()) return null;
-    const user = { id: snap.id, ...snap.data() };
-    const current = memory || readLocal();
-    memory = {
-      ...current,
-      users: [user, ...current.users.filter((item) => item.phone !== phone)],
-    };
-    writeLocal(memory);
-    return user;
-  } catch (error) {
-    console.warn(error);
-    return null;
-  }
-}
-
 function withTimeout(promise, ms) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('firestore-timeout')), ms);
+    const timer = setTimeout(() => reject(new Error('database-timeout')), ms);
     promise.then(
       (value) => {
         clearTimeout(timer);
@@ -136,20 +121,54 @@ function withTimeout(promise, ms) {
   });
 }
 
-async function pullAll(firebase) {
-  const { db, collection, getDocs } = firebase;
-  async function pull(name) {
-    const snap = await getDocs(collection(db, name));
-    return {
-      items: snap.docs.map((item) => ({ id: item.id, ...item.data() })),
-      fromCache: snap.metadata.fromCache,
+function nodeList(snap) {
+  if (!snap.exists()) return null;
+  const value = snap.val();
+  if (!value || typeof value !== 'object') return [];
+  return Object.entries(value).map(([id, data]) => ({
+    id,
+    ...(data && typeof data === 'object' ? data : {}),
+  }));
+}
+
+function plainRecord(record) {
+  return JSON.parse(JSON.stringify(record));
+}
+
+async function ensureSignedIn(firebase) {
+  if (firebase.auth.currentUser) return;
+  await firebase.signInAnonymously(firebase.auth);
+}
+
+export async function findUserByPhone(phone) {
+  const local = (memory || readLocal()).users.find((user) => user.phone === phone) || null;
+  if (local || !isFirebaseConfigured()) return local;
+  try {
+    const firebase = await loadFirebase();
+    const snap = await withTimeout(firebase.get(firebase.ref(firebase.db, `users/${phone}`)), 6000);
+    if (!snap.exists()) return null;
+    const user = { id: phone, ...(snap.val() || {}) };
+    const current = memory || readLocal();
+    memory = {
+      ...current,
+      users: [user, ...current.users.filter((item) => item.phone !== phone)],
     };
+    writeLocal(memory);
+    return user;
+  } catch (error) {
+    console.warn(error);
+    return null;
+  }
+}
+
+async function pullAll(firebase) {
+  const { db, ref, get } = firebase;
+  async function pull(name) {
+    const snap = await get(ref(db, name));
+    return { name, items: nodeList(snap) };
   }
   const [requests, ads] = await Promise.all([pull('requests'), pull('ads')]);
-  return {
-    data: { requests: requests.items, ads: ads.items },
-    fromCache: requests.fromCache || ads.fromCache,
-  };
+  return { requests, ads };
 }
 
 export function hydrate() {
@@ -164,8 +183,11 @@ async function doHydrate() {
     const firebase = await loadFirebase();
     if (!firebase) return memory;
     const remote = await withTimeout(pullAll(firebase), 6000);
-    if (remote.fromCache) return memory;
-    memory = { ...memory, requests: remote.data.requests, ads: remote.data.ads };
+    memory = {
+      ...memory,
+      requests: remote.requests.items === null ? memory.requests : remote.requests.items,
+      ads: remote.ads.items === null ? memory.ads : remote.ads.items,
+    };
     writeLocal(memory);
     return memory;
   } catch (error) {
@@ -199,18 +221,48 @@ export async function saveItem(kind, item) {
   if (!isFirebaseConfigured()) return { data: next, warning: '' };
   try {
     const firebase = await loadFirebase();
-    await firebase.setDoc(firebase.doc(firebase.db, kind, record.id), record);
+    await withTimeout(
+      (async () => {
+        try {
+          await ensureSignedIn(firebase);
+        } catch (error) {
+          console.warn(error);
+        }
+        await firebase.set(firebase.ref(firebase.db, `${kind}/${record.id}`), plainRecord(record));
+      })(),
+      8000,
+    );
     return { data: next, warning: '' };
   } catch (error) {
     console.warn(error);
-    return { data: next, warning: 'حُفظ على هذا الجهاز، وتعذر تحديث قاعدة البيانات.' };
+    return {
+      data: next,
+      warning:
+        error?.message === 'database-timeout'
+          ? 'انتهت مهلة الاتصال بقاعدة البيانات. أعد المحاولة.'
+          : 'تعذر الحفظ في قاعدة البيانات. أعد المحاولة.',
+    };
   }
 }
 
 export async function listOwnerCollection(kind) {
-  const firebase = await loadFirebase();
-  const snap = await withTimeout(firebase.getDocs(firebase.collection(firebase.db, kind)), 8000);
-  return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
+  const local = (memory || readLocal())[kind] || [];
+  try {
+    const firebase = await loadFirebase();
+    const snap = await withTimeout(firebase.get(firebase.ref(firebase.db, kind)), 8000);
+    const remote = nodeList(snap);
+    if (remote === null) return local;
+    const byId = new Map();
+    for (const item of local) byId.set(item.id, item);
+    for (const item of remote) byId.set(item.id, { ...byId.get(item.id), ...item });
+    const items = [...byId.values()];
+    const current = memory || readLocal();
+    commit({ ...current, [kind]: items });
+    return items;
+  } catch (error) {
+    console.warn(error);
+    return local;
+  }
 }
 
 export async function removeItem(kind, id) {
@@ -224,10 +276,26 @@ export async function removeItem(kind, id) {
   if (!isFirebaseConfigured()) return { data: next, warning: '' };
   try {
     const firebase = await loadFirebase();
-    await firebase.deleteDoc(firebase.doc(firebase.db, kind, id));
+    await withTimeout(
+      (async () => {
+        try {
+          await ensureSignedIn(firebase);
+        } catch (error) {
+          console.warn(error);
+        }
+        await firebase.remove(firebase.ref(firebase.db, `${kind}/${id}`));
+      })(),
+      8000,
+    );
     return { data: next, warning: '' };
   } catch (error) {
     console.warn(error);
-    return { data: next, warning: 'حُذف من هذا الجهاز، وتعذر تحديث قاعدة البيانات.' };
+    return {
+      data: next,
+      warning:
+        error?.message === 'database-timeout'
+          ? 'انتهت مهلة الاتصال بقاعدة البيانات. أعد المحاولة.'
+          : 'تعذر الحذف من قاعدة البيانات. أعد المحاولة.',
+    };
   }
 }

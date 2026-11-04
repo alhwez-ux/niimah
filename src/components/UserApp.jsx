@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAppState } from '../context';
 import { saveSession } from '../lib/auth';
+import { initialLocation, readLocation } from '../lib/asir';
 import { isSaudiMobile, normalizeDigits } from '../lib/phone';
 import {
   CATEGORIES,
@@ -11,6 +12,7 @@ import {
   saveItem,
 } from '../lib/repository';
 import InstallPrompt from './InstallPrompt';
+import LocationFields from './LocationFields';
 import { Button, Field, Warning, inputClass } from './ui';
 
 function newest(list) {
@@ -139,6 +141,7 @@ function Requests({ user, data, showForm, setShowForm, kind, setKind, onResult }
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState(CATEGORIES[0]);
+  const [location, setLocation] = useState(() => initialLocation(user));
   const [contact, setContact] = useState(user.phone || '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -161,31 +164,48 @@ function Requests({ user, data, showForm, setShowForm, kind, setKind, onResult }
       setError('أدخل رقم تواصل صحيح');
       return;
     }
+    const place = readLocation(location.city, location.districtChoice, location.customDistrict);
+    if (!place) {
+      setError('اكتب اسم الحي');
+      return;
+    }
     setBusy(true);
     try {
-      onResult(
-        await saveItem('requests', {
-          id: newId(),
-          title: title.trim(),
-          description: description.trim(),
-          category,
-          kind,
-          status: 'open',
-          contact: phone,
-          userId: user.id,
-          createdAt: Date.now(),
-        }),
-      );
+      const result = await saveItem('requests', {
+        id: newId(),
+        title: title.trim(),
+        description: description.trim(),
+        category,
+        kind,
+        status: 'open',
+        city: place.city,
+        district: place.district,
+        contact: phone,
+        userId: user.id,
+        createdAt: Date.now(),
+      });
+      onResult(result);
+      if (result.warning) {
+        setError(result.warning);
+        return;
+      }
       setTitle('');
       setDescription('');
       setShowForm(false);
+    } catch (err) {
+      setError(err.message || 'تعذر الحفظ');
     } finally {
       setBusy(false);
     }
   }
 
   async function markDone(item) {
-    onResult(await saveItem('requests', { ...item, status: 'done' }));
+    try {
+      const result = await saveItem('requests', { ...item, status: 'done' });
+      onResult(result);
+    } catch (err) {
+      onResult({ warning: err.message || 'تعذر الحفظ. أعد المحاولة.' });
+    }
   }
 
   return (
@@ -229,6 +249,12 @@ function Requests({ user, data, showForm, setShowForm, kind, setKind, onResult }
               احتياج
             </TypeButton>
           </div>
+          <LocationFields
+            city={location.city}
+            districtChoice={location.districtChoice}
+            customDistrict={location.customDistrict}
+            onChange={setLocation}
+          />
           <Field label="رقم التواصل">
             <input
               className={inputClass}
@@ -243,8 +269,8 @@ function Requests({ user, data, showForm, setShowForm, kind, setKind, onResult }
               {error}
             </p>
           ) : null}
-          <Button type="submit" disabled={busy}>
-            {busy ? 'جارٍ النشر' : 'نشر'}
+          <Button type="submit" busy={busy}>
+            {busy ? 'جارٍ الحفظ' : 'نشر'}
           </Button>
         </form>
       ) : null}
@@ -300,23 +326,43 @@ function Ads({ data }) {
 function Profile({ user, onResult, updateSession, onLogout }) {
   const [name, setName] = useState(user.name || '');
   const [role, setRole] = useState(user.role || 'donor');
+  const [location, setLocation] = useState(() => initialLocation(user));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
   async function save(event) {
     event.preventDefault();
     if (!name.trim()) return;
-    const next = { ...user, name: name.trim(), role };
+    const place = readLocation(location.city, location.districtChoice, location.customDistrict);
+    if (!place) {
+      setMessage('اكتب اسم الحي');
+      return;
+    }
+    const next = { ...user, name: name.trim(), role, city: place.city, district: place.district };
     setBusy(true);
     try {
-      onResult(await saveItem('users', next));
+      const result = await saveItem('users', next);
+      onResult(result);
+      if (result.warning) {
+        setMessage(result.warning);
+        return;
+      }
       const session = {
         kind: 'user',
-        user: { id: next.id, name: next.name, phone: next.phone, role: next.role },
+        user: {
+          id: next.id,
+          name: next.name,
+          phone: next.phone,
+          role: next.role,
+          city: next.city,
+          district: next.district,
+        },
       };
       saveSession(session);
       updateSession(session);
       setMessage('تم حفظ بياناتك');
+    } catch (err) {
+      setMessage(err.message || 'تعذر الحفظ. أعد المحاولة.');
     } finally {
       setBusy(false);
     }
@@ -328,7 +374,7 @@ function Profile({ user, onResult, updateSession, onLogout }) {
       <p className="text-base text-ink/70" dir="ltr">
         {user.phone}
       </p>
-      <Field label="الاسم">
+      <Field label="الاسم (يمكنك اختيار اسم مستعار أو كنيه)">
         <input className={inputClass} maxLength={40} value={name} onChange={(event) => setName(event.target.value)} />
       </Field>
       <div className="grid grid-cols-2 gap-2">
@@ -339,8 +385,14 @@ function Profile({ user, onResult, updateSession, onLogout }) {
           محتاج
         </TypeButton>
       </div>
+      <LocationFields
+        city={location.city}
+        districtChoice={location.districtChoice}
+        customDistrict={location.customDistrict}
+        onChange={setLocation}
+      />
       {message ? <p className="text-sm font-semibold text-brand-deep">{message}</p> : null}
-      <Button type="submit" disabled={busy}>
+      <Button type="submit" busy={busy}>
         {busy ? 'جارٍ الحفظ' : 'حفظ'}
       </Button>
       <Button variant="ghost" onClick={onLogout}>
@@ -358,6 +410,11 @@ function RequestCard({ item, action }) {
         <span className="text-sm text-ink/60">{item.category}</span>
       </div>
       <h3 className="mt-2 text-base font-bold text-ink">{item.title}</h3>
+      {item.city || item.district ? (
+        <p className="mt-1 text-sm font-semibold text-brand-deep">
+          {[item.city, item.district].filter(Boolean).join(' · ')}
+        </p>
+      ) : null}
       <p className="mt-1 text-base leading-relaxed text-ink/80">{item.description}</p>
       <div className="mt-3 flex items-center justify-between gap-3">
         <span className="text-sm text-ink/60">

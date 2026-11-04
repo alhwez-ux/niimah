@@ -2,19 +2,29 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppContext } from './context';
 import { installStore } from './installStore';
 import { loadSession, logout, saveSession, watchAuthUser } from './lib/auth';
+import { isStaffPhone, isSuperAdmin } from './lib/access';
 import { hydrate } from './lib/repository';
 import AdminPanel from './components/AdminPanel';
 import LoginScreen from './components/LoginScreen';
+import SplashScreen from './components/SplashScreen';
 import UserApp from './components/UserApp';
 import { OfflineBar } from './components/ui';
 
+const SPLASH_MS = 2600;
+
 export default function App() {
   const [ready, setReady] = useState(false);
+  const [splashOn, setSplashOn] = useState(true);
   const [session, setSession] = useState(null);
   const [data, setData] = useState({ users: [], requests: [], ads: [] });
   const [warning, setWarning] = useState('');
   const [installEvent, setInstallEvent] = useState(installStore.event);
   const [installed, setInstalled] = useState(installStore.installed);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSplashOn(false), SPLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const sync = () => {
@@ -34,11 +44,17 @@ export default function App() {
       setData(next);
       let stored = loadSession();
       if (stored?.kind === 'owner') {
-        try {
-          const user = await watchAuthUser();
-          if (!user?.email?.endsWith('@niimah.app')) stored = null;
-        } catch {
-          stored = null;
+        if (stored.phone) {
+          if (!(await isStaffPhone(stored.phone))) stored = null;
+          else stored = { ...stored, role: isSuperAdmin(stored.phone) ? 'super' : 'supervisor' };
+        } else {
+          try {
+            const user = await watchAuthUser();
+            if (!user?.email?.endsWith('@niimah.app')) stored = null;
+            else stored = { ...stored, role: 'super' };
+          } catch {
+            stored = null;
+          }
         }
       }
       if (stored?.kind === 'user' && !stored.user?.phone) stored = null;
@@ -88,19 +104,13 @@ export default function App() {
     setInstallEvent(null);
   }
 
-  if (!ready) {
-    return (
-      <div className="grid min-h-screen w-full place-items-center bg-brand text-white">
-        <div className="text-center">
-          <img src="/logo.jpg" alt="نعمه" className="mx-auto w-56" />
-          <h1 className="text-xl font-bold md:text-2xl">نعمه</h1>
-        </div>
-      </div>
-    );
+  if (splashOn || !ready) {
+    return <SplashScreen onContinue={() => setSplashOn(false)} />;
   }
 
   const value = {
     data,
+    session,
     warning,
     onResult,
     signIn,

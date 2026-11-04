@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export const inputClass =
   'w-full max-w-full rounded-2xl border border-brand/15 bg-white px-4 py-3 text-base text-ink outline-none placeholder:text-ink/40 focus:border-brand focus:ring-2 focus:ring-brand/30';
@@ -18,6 +18,9 @@ export function Button({
   full = true,
   className = '',
   type = 'button',
+  busy = false,
+  disabled = false,
+  onPointerDown,
   ...props
 }) {
   const variants = {
@@ -26,14 +29,42 @@ export function Button({
     ghost: 'bg-white text-brand-deep ring-1 ring-brand/15',
     danger: 'bg-red-50 text-red-800',
   };
+  const locked = disabled || busy;
+  const [pulse, setPulse] = useState(false);
+  const timer = useRef(0);
+  const moving = busy || (pulse && variant === 'primary');
+
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  function beginPulse() {
+    if (locked || variant !== 'primary') return;
+    window.clearTimeout(timer.current);
+    setPulse(true);
+    timer.current = window.setTimeout(() => setPulse(false), 700);
+  }
 
   return (
     <button
       type={type}
-      className={`inline-flex min-h-12 items-center justify-center rounded-2xl px-4 py-3 text-base font-bold transition active:scale-[0.99] disabled:opacity-60 ${variants[variant]} ${full ? 'w-full' : ''} ${className}`}
+      disabled={locked}
+      aria-busy={moving || undefined}
+      className={`relative inline-flex min-h-12 items-center justify-center gap-2 overflow-hidden rounded-2xl px-4 py-3 text-base font-bold transition duration-150 active:scale-[0.97] disabled:cursor-not-allowed ${moving ? '' : 'disabled:opacity-60'} ${variants[variant]} ${full ? 'w-full' : ''} ${className}`}
       {...props}
+      onPointerDown={(event) => {
+        beginPulse();
+        onPointerDown?.(event);
+      }}
     >
-      {children}
+      {moving ? (
+        <span className="pointer-events-none absolute inset-y-0 w-1/2 animate-niimah-sheen bg-white/25" aria-hidden="true" />
+      ) : null}
+      {moving ? (
+        <span
+          className="relative h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+          aria-hidden="true"
+        />
+      ) : null}
+      <span className="relative">{children}</span>
     </button>
   );
 }
