@@ -3,13 +3,13 @@ export default function SplashScreen({ onContinue }) {
     <button
       type="button"
       onClick={onContinue}
-      className="grid h-dvh min-h-screen w-full place-items-center bg-brand px-10 pb-safe pl-safe pr-safe pt-safe"
+      className="grid h-dvh min-h-screen w-full place-items-center bg-brand px-6 pb-safe pl-safe pr-safe pt-safe"
       aria-label="نعمه"
     >
       <img
-        src="/logo.jpg"
+        src="/logo.png"
         alt=""
-        className="w-[min(62vw,240px)] max-h-[42dvh] object-contain"
+        className="h-60 w-60 object-contain"
       />
     </button>
   );

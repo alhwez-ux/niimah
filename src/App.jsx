@@ -10,11 +10,14 @@ import SplashScreen from './components/SplashScreen';
 import UserApp from './components/UserApp';
 import { OfflineBar } from './components/ui';
 
-const SPLASH_MS = 2600;
+const SPLASH_MS = 2000;
+const SPLASH_FADE_MS = 500;
 
 export default function App() {
   const [ready, setReady] = useState(false);
   const [splashOn, setSplashOn] = useState(true);
+  const [splashLeaving, setSplashLeaving] = useState(false);
+  const [splashSkip, setSplashSkip] = useState(false);
   const [session, setSession] = useState(null);
   const [data, setData] = useState({ users: [], requests: [], ads: [] });
   const [warning, setWarning] = useState('');
@@ -22,9 +25,16 @@ export default function App() {
   const [installed, setInstalled] = useState(installStore.installed);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setSplashOn(false), SPLASH_MS);
+    const timer = window.setTimeout(() => setSplashSkip(true), SPLASH_MS);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!ready || !splashSkip || !splashOn) return undefined;
+    setSplashLeaving(true);
+    const timer = window.setTimeout(() => setSplashOn(false), SPLASH_FADE_MS);
+    return () => window.clearTimeout(timer);
+  }, [ready, splashSkip, splashOn]);
 
   useEffect(() => {
     const sync = () => {
@@ -104,10 +114,6 @@ export default function App() {
     setInstallEvent(null);
   }
 
-  if (splashOn || !ready) {
-    return <SplashScreen onContinue={() => setSplashOn(false)} />;
-  }
-
   const value = {
     data,
     session,
@@ -124,18 +130,31 @@ export default function App() {
 
   return (
     <AppContext.Provider value={value}>
-      <div className="min-h-screen w-full bg-brand-deep">
-        <div className="mx-auto flex h-dvh min-h-screen w-full max-w-md flex-col overflow-hidden bg-brand pl-safe pr-safe pt-safe shadow-2xl">
-          <OfflineBar />
-          {session?.kind === 'owner' ? (
-            <AdminPanel />
-          ) : session?.kind === 'user' ? (
-            <UserApp session={session} />
-          ) : (
-            <LoginScreen />
-          )}
+      {ready ? (
+        <div className="min-h-screen w-full bg-brand-deep">
+          <div className="mx-auto flex h-dvh min-h-screen w-full max-w-md flex-col overflow-hidden bg-brand pl-safe pr-safe pt-safe shadow-2xl">
+            <OfflineBar />
+            {session?.kind === 'owner' ? (
+              <AdminPanel />
+            ) : session?.kind === 'user' ? (
+              <UserApp session={session} />
+            ) : (
+              <LoginScreen />
+            )}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="h-dvh min-h-screen w-full bg-brand" />
+      )}
+      {splashOn ? (
+        <div
+          className={`fixed inset-0 z-50 transition-opacity duration-500 ease-out ${
+            splashLeaving ? 'pointer-events-none opacity-0' : 'opacity-100'
+          }`}
+        >
+          <SplashScreen onContinue={() => setSplashSkip(true)} />
+        </div>
+      ) : null}
     </AppContext.Provider>
   );
 }

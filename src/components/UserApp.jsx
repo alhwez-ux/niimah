@@ -44,7 +44,7 @@ export default function UserApp({ session }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="px-5 pb-6 pt-3 text-white">
-        <img src="/logo.jpg" alt="نعمه" className="mx-auto h-16 w-auto object-contain" />
+        <img src="/logo.png" alt="نعمه" className="mx-auto h-16 w-auto object-contain" />
         <div className="mt-2 flex items-end justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm text-white/80">أهلًا بك</p>

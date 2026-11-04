@@ -15,6 +15,7 @@ export default {
       },
       fontFamily: {
         sans: ['Cairo', 'Tajawal', 'Segoe UI', 'Tahoma', 'sans-serif'],
+        tajawal: ['Tajawal', 'Cairo', 'Segoe UI', 'Tahoma', 'sans-serif'],
       },
     },
   },
